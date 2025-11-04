@@ -13,30 +13,36 @@ namespace FunctionPlotter
         // ===================================================================
 
         // Діапазон значень X та крок, як у завданні
-        private const double xMin = 3.8;
-        private const double xMax = 7.6;
-        private const double dx = 0.6;
+        private const double XMin = 3.8;
+        private const double XMax = 7.6;
+        private const double Dx = 0.6;
 
         // Розраховані межі для осі Y
-        private double yMin;
-        private double yMax;
+        private double _yMin;
+        private double _yMax;
 
         // Відступ від країв вікна до області графіка
-        private const int padding = 60;
+        private const int Padding = 60;
+
+        // Кешовані точки графіка у світових координатах
+        private readonly List<PointF> _worldPoints = new List<PointF>();
 
         public GraphForm()
         {
             this.Text = "Графік функції y = cos²(x) / (x² + 1)";
             this.Size = new Size(800, 600);
             this.BackColor = Color.White;
-            this.DoubleBuffered = true; // Зменшує мерехтіння при перемальовуванні
+            
+            // Більш надійний спосіб увімкнути подвійну буферизацію для зменшення мерехтіння
+            this.SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true);
 
             // Підписуємось на події
             this.Paint += GraphForm_Paint;
             this.Resize += GraphForm_Resize;
 
-            // Розраховуємо діапазон Y один раз при запуску
+            // Розраховуємо діапазон Y та точки графіка один раз
             CalculateYRange();
+            CacheWorldPoints();
         }
 
         // ===================================================================
@@ -52,8 +58,8 @@ namespace FunctionPlotter
             g.SmoothingMode = SmoothingMode.AntiAlias; // Вмикаємо згладжування
 
             // Визначаємо розміри області для малювання графіка
-            int graphWidth = this.ClientSize.Width - 2 * padding;
-            int graphHeight = this.ClientSize.Height - 2 * padding;
+            int graphWidth = this.ClientSize.Width - 2 * Padding;
+            int graphHeight = this.ClientSize.Height - 2 * Padding;
 
             // Якщо вікно занадто мале, нічого не малюємо
             if (graphWidth <= 0 || graphHeight <= 0) return;
@@ -85,28 +91,27 @@ namespace FunctionPlotter
             using (Pen gridPen = new Pen(Color.LightGray, 1) { DashStyle = DashStyle.Dash })
             using (Brush textBrush = new SolidBrush(Color.Black))
             using (Font textFont = new Font("Arial", 8))
+            using (StringFormat formatX = new StringFormat { Alignment = StringAlignment.Center })
+            using (StringFormat formatY = new StringFormat { Alignment = StringAlignment.Far })
             {
-                StringFormat formatX = new StringFormat { Alignment = StringAlignment.Center };
-                StringFormat formatY = new StringFormat { Alignment = StringAlignment.Far };
-
                 // --- Вісь X та її сітка/підписи ---
-                g.DrawLine(axisPen, padding, padding + graphHeight, padding + graphWidth, padding + graphHeight);
-                for (double x = xMin; x <= xMax; x += dx)
+                g.DrawLine(axisPen, Padding, Padding + graphHeight, Padding + graphWidth, Padding + graphHeight);
+                for (double x = XMin; x <= XMax; x += Dx)
                 {
                     int screenX = (int)MapWorldToScreenX(x, graphWidth);
-                    g.DrawLine(gridPen, screenX, padding, screenX, padding + graphHeight);
-                    g.DrawString(x.ToString("F1"), textFont, textBrush, screenX, padding + graphHeight + 5, formatX);
+                    g.DrawLine(gridPen, screenX, Padding, screenX, Padding + graphHeight);
+                    g.DrawString(x.ToString("F1"), textFont, textBrush, screenX, Padding + graphHeight + 5, formatX);
                 }
 
                 // --- Вісь Y та її сітка/підписи ---
-                g.DrawLine(axisPen, padding, padding, padding, padding + graphHeight);
+                g.DrawLine(axisPen, Padding, Padding, Padding, Padding + graphHeight);
                 int numYTicks = 5;
                 for (int i = 0; i <= numYTicks; i++)
                 {
-                    double y = yMin + i * (yMax - yMin) / numYTicks;
+                    double y = _yMin + i * (_yMax - _yMin) / numYTicks;
                     int screenY = (int)MapWorldToScreenY(y, graphHeight);
-                    g.DrawLine(gridPen, padding, screenY, padding + graphWidth, screenY);
-                    g.DrawString(y.ToString("F3"), textFont, textBrush, padding - 5, screenY - (textFont.Height / 2), formatY);
+                    g.DrawLine(gridPen, Padding, screenY, Padding + graphWidth, screenY);
+                    g.DrawString(y.ToString("F3"), textFont, textBrush, Padding - 5, screenY - (textFont.Height / 2), formatY);
                 }
             }
         }
@@ -116,22 +121,23 @@ namespace FunctionPlotter
         /// </summary>
         private void DrawFunctionGraph(Graphics g, int graphWidth, int graphHeight)
         {
-            // Використовуємо маленький крок для плавної лінії
-            double step = (xMax - xMin) / graphWidth;
-            List<PointF> points = new List<PointF>();
+            if (_worldPoints.Count < 2) return;
 
-            for (double x = xMin; x <= xMax; x += step)
+            // Трансформуємо кешовані точки у екранні координати
+            PointF[] screenPoints = new PointF[_worldPoints.Count];
+            for (int i = 0; i < _worldPoints.Count; i++)
             {
-                double y = F(x);
-                points.Add(new PointF((float)MapWorldToScreenX(x, graphWidth), (float)MapWorldToScreenY(y, graphHeight)));
+                double x = _worldPoints[i].X;
+                double y = _worldPoints[i].Y;
+                screenPoints[i] = new PointF(
+                    (float)MapWorldToScreenX(x, graphWidth),
+                    (float)MapWorldToScreenY(y, graphHeight)
+                );
             }
 
-            if (points.Count > 1)
+            using (Pen graphPen = new Pen(Color.Blue, 2))
             {
-                using (Pen graphPen = new Pen(Color.Blue, 2))
-                {
-                    g.DrawLines(graphPen, points.ToArray());
-                }
+                g.DrawLines(graphPen, screenPoints);
             }
         }
 
@@ -149,34 +155,48 @@ namespace FunctionPlotter
         }
 
         /// <summary>
+        /// Розраховує та кешує точки функції у світових координатах для плавної лінії.
+        /// </summary>
+        private void CacheWorldPoints()
+        {
+            _worldPoints.Clear();
+            // Використовуємо фіксований, достатньо великий крок для плавності
+            double step = (XMax - XMin) / 2000.0;
+            for (double x = XMin; x <= XMax; x += step)
+            {
+                _worldPoints.Add(new PointF((float)x, (float)F(x)));
+            }
+        }
+
+        /// <summary>
         /// Знаходить мінімальне та максимальне значення Y в нашому діапазоні X.
         /// Це потрібно для правильного масштабування графіка по висоті.
         /// </summary>
         private void CalculateYRange()
         {
             // Перевіряємо 1000 точок, щоб знайти екстремуми
-            double step = (xMax - xMin) / 1000.0;
-            yMin = F(xMin);
-            yMax = F(xMin);
+            double step = (XMax - XMin) / 1000.0;
+            _yMin = F(XMin);
+            _yMax = F(XMin);
 
-            for (double x = xMin; x <= xMax; x += step)
+            for (double x = XMin; x <= XMax; x += step)
             {
                 double y = F(x);
-                if (y < yMin) yMin = y;
-                if (y > yMax) yMax = y;
+                if (y < _yMin) _yMin = y;
+                if (y > _yMax) _yMax = y;
             }
 
             // Додамо 10% буфер зверху і знизу, щоб графік не торкався країв
-            double yBuffer = (yMax - yMin) * 0.1;
+            double yBuffer = (_yMax - _yMin) * 0.1;
             if (yBuffer == 0) yBuffer = 0.1; // На випадок, якщо функція - константа
-            yMax += yBuffer;
-            yMin -= yBuffer;
+            _yMax += yBuffer;
+            _yMin -= yBuffer;
 
             // Оскільки наша функція (cos^2 / ...) завжди >= 0,
             // ми можемо зробити нижню межу 0, якщо вона близько.
-            if (yMin < 0)
+            if (_yMin < 0)
             {
-                yMin = 0;
+                _yMin = 0;
             }
         }
 
@@ -185,7 +205,7 @@ namespace FunctionPlotter
         /// </summary>
         private double MapWorldToScreenX(double x, int graphWidth)
         {
-            return padding + (x - xMin) * graphWidth / (xMax - xMin);
+            return Padding + (x - XMin) * graphWidth / (XMax - XMin);
         }
 
         /// <summary>
@@ -193,9 +213,14 @@ namespace FunctionPlotter
         /// </summary>
         private double MapWorldToScreenY(double y, int graphHeight)
         {
+            double yRange = _yMax - _yMin;
+            if (Math.Abs(yRange) < 1e-9) // Захист від ділення на нуль
+            {
+                return Padding + graphHeight / 2.0;
+            }
             // (yMax - y) - це інверсія, оскільки Y=0 на екрані знаходиться *зверху*,
             // а в математичному графіку - *знизу*.
-            return padding + (yMax - y) * graphHeight / (yMax - yMin);
+            return Padding + (_yMax - y) * graphHeight / yRange;
         }
     }
 
